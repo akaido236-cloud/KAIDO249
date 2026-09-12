@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="kaido_bg">#0B0D10</color>
+    <color name="kaido_surface">#151A20</color>
+    <color name="kaido_text">#E6E8EA</color>
+    <color name="kaido_muted">#8B929A</color>
+    <color name="kaido_accent">#3B82F6</color>
+</resources>

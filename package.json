@@ -1,0 +1,26 @@
+{
+  "name": "kaido",
+  "version": "0.1.0",
+  "private": true,
+  "description": "KAIDO — a personal AI Agent Operating System. Master agent + child agents, tool registry, permission and risk engine, memory, automations.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "kaido": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "dev": "node --import tsx src/cli.ts",
+    "check": "npm run typecheck && npm run test"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.2"
+  }
+}
