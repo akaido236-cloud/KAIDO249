@@ -20,6 +20,7 @@ import { Kaido } from './index.js';
 import { Permission } from './core/types.js';
 import { TEMPLATES as TEMPLATE_LIST } from './agent/templates.js';
 import { validateTermuxCommand } from './tools/builtin.js';
+import { DEFAULT_MODEL } from './agent/factory.js';
 
 const args = process.argv.slice(2);
 const dataDir = process.env.KAIDO_DATA_DIR ?? null;
@@ -163,7 +164,7 @@ async function main(): Promise<void> {
       try {
         const res = await kaido.provider.chat(
           [{ role: 'user', content: 'Reply with exactly: OK' }],
-          { model: process.env.KAIDO_DEFAULT_MODEL ?? 'gemini-2.0-flash', maxTokens: 16 },
+          { model: DEFAULT_MODEL, maxTokens: 16 },
         );
         const reply = (res.content ?? '').trim();
         line(`  model replied    : "${reply.slice(0, 60)}"`);

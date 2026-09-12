@@ -151,7 +151,7 @@ export type ChildAgent = {
 
   systemPrompt: string;
 
-  /** Provider-agnostic model identifier, e.g. "gemini-2.0-flash". */
+  /** Provider-agnostic model identifier, e.g. "gemini-3.6-flash". */
   model: string;
 
   enabled: boolean;

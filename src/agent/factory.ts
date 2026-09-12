@@ -25,7 +25,9 @@ export type AgentSpec = {
   enabled?: boolean;
 };
 
-export const DEFAULT_MODEL = process.env.KAIDO_DEFAULT_MODEL ?? 'gemini-2.0-flash';
+// Bump this when a provider retires a model. Override per-shell with
+// KAIDO_DEFAULT_MODEL, or per-agent with spec.model.
+export const DEFAULT_MODEL = process.env.KAIDO_DEFAULT_MODEL ?? 'gemini-3.6-flash';
 
 /**
  * The AgentFactory turns a spec into a fully-formed ChildAgent. Agents are

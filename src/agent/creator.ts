@@ -1,7 +1,7 @@
 import { ChildAgent, Permission, RiskLevel } from '../core/types.js';
 import { AIProvider, ChatMessage } from '../ai/provider.js';
 import { AgentRegistry } from './registry.js';
-import { AgentSpec, WRITE_CONFIRM_POLICY } from './factory.js';
+import { AgentSpec, WRITE_CONFIRM_POLICY, DEFAULT_MODEL } from './factory.js';
 import { extractJsonLoose } from './orchestrator.js';
 import { wrapUntrusted } from '../security/injection.js';
 
@@ -133,7 +133,7 @@ export class AgentCreator {
   }
 
   private defaultModel(): string {
-    return process.env.KAIDO_DEFAULT_MODEL ?? 'gemini-2.0-flash';
+    return DEFAULT_MODEL;
   }
 }
 

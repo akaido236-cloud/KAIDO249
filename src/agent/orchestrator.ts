@@ -104,11 +104,22 @@ export class MasterOrchestrator {
       }
       if (!best || score > best.score) best = { agent, score };
     }
-    return best && best.score > 0 ? best.agent : undefined;
+    // A keyword match alone is fragile for non-English input: an Arabic goal
+    // scored zero against English descriptions and routed nowhere. The LLM
+    // planner is the real router; this fallback exists for when planning fails,
+    // so when nothing matches we fall back to the first enabled agent rather
+    // than refusing outright. The runtime still gates whatever it attempts.
+    if (best && best.score > 0) return best.agent;
+    return candidates[0];
   }
 
   /** Build an explicit plan from a goal, using the provider when available. */
   async plan(goal: string): Promise<DelegationPlan> {
+    // Reset per call. Without this a planner failure from an earlier run would
+    // still be reported after a later run succeeded.
+    this.lastPlannerError = null;
+    this.lastPlannerRaw = null;
+
     // The Master Agent is excluded here too: it holds no tools, so a plan that
     // assigns work to it can only fail. Listing it invited the model to pick it.
     const agents = this.registry
@@ -126,6 +137,30 @@ export class MasterOrchestrator {
       },
       { role: 'user', content: wrapUntrusted(goal, 'unknown') },
     ];
+    // If no child agents are installed there is nothing to delegate to. Say so
+    // plainly rather than producing a plan that cannot succeed — that was a real
+    // failure mode: the model was shown an empty list, invented an agent name,
+    // and the run died with a bare NO_AGENT_MATCH.
+    if (agents.length === 0) {
+      this.lastPlannerError =
+        'NO_AGENTS_INSTALLED: no child agents exist yet. Run "kaido add-all-templates" ' +
+        'to install the built-in agents, or create one with "kaido create".';
+      return {
+        id: makeId('plan'),
+        goal,
+        steps: [
+          {
+            step: 1,
+            agentName: '(none installed)',
+            objective:
+              'Install an agent first: run "kaido add-all-templates".',
+            status: 'failed',
+          },
+        ],
+        createdAt: nowIso(),
+      };
+    }
+
     const steps: DelegationPlanStep[] = [];
     try {
       const res = await this.provider.chat(prompt, {

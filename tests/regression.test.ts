@@ -52,3 +52,46 @@ test('the outcome always carries an errors array, even on success', async () => 
   const { outcome } = await kaido.ask('research something');
   assert.ok(Array.isArray(outcome.errors), 'errors must always be an array');
 });
+
+// ── Round 2: failures observed on the phone with a live Gemini key ───────────
+
+test('with no child agents installed, the plan says so instead of inventing one', async () => {
+  const kaido = new Kaido({ provider: new MockProvider(), dataDir: null, tools: [] });
+  const plan = await kaido.ask('اعمل لي ملخص');
+
+  assert.equal(plan.plan.steps.length, 1);
+  assert.equal(plan.plan.steps[0]!.status, 'failed');
+  assert.match(plan.plan.steps[0]!.objective, /add-all-templates/);
+
+  // And the reason is reported, not swallowed.
+  assert.ok(kaido.lastPlannerError, 'expected a planner error to be reported');
+  assert.match(kaido.lastPlannerError!, /NO_AGENTS_INSTALLED/);
+  const joined = plan.outcome.errors.join(' ');
+  assert.match(joined, /NO_AGENTS_INSTALLED/);
+});
+
+test('an Arabic goal still routes to an agent once one exists', async () => {
+  const kaido = new Kaido({ provider: new MockProvider(), dataDir: null, tools: [] });
+  kaido.instantiateTemplate('kaido-researcher');
+
+  const agent = kaido.orchestrator.route('ابحث لي عن معلومات');
+  assert.ok(agent, 'expected a fallback agent for a non-English goal');
+  assert.notEqual(agent!.name, 'KAIDO');
+});
+
+test('a planner error from an earlier run is cleared by a later one', async () => {
+  // Call plan() directly: ask() would also invoke the agent, which consumes a
+  // queued reply and makes the sequence ambiguous.
+  const provider = new MockProvider().enqueue(
+    'not json at all',
+    JSON.stringify({ steps: [{ agentName: 'KAIDO RESEARCHER', objective: 'ok' }] }),
+  );
+  const kaido = new Kaido({ provider, dataDir: null, tools: [] });
+  kaido.instantiateTemplate('kaido-researcher');
+
+  await kaido.orchestrator.plan('first goal that fails to parse');
+  assert.ok(kaido.lastPlannerError, 'expected the first run to record an error');
+
+  await kaido.orchestrator.plan('second goal that parses fine');
+  assert.equal(kaido.lastPlannerError, null, 'a later success must clear the old error');
+});
