@@ -11,6 +11,7 @@ import { AgentRuntime } from './runtime.js';
 import { AuditLog } from '../security/audit.js';
 import { AIProvider, ChatMessage } from '../ai/provider.js';
 import { UNTRUSTED_CONTENT_POLICY, wrapUntrusted } from '../security/injection.js';
+import { DEFAULT_MODEL } from './factory.js';
 
 export type DelegationPlanStep = {
   step: number;
@@ -33,6 +34,11 @@ export type TaskOutcome = {
   actionsPerformed: string[];
   requiresUserAction: boolean;
   pendingConfirmations: { id: string; preview: string }[];
+  /**
+   * Every error collected while executing the plan. Always populated on
+   * failure — a caller must never have to guess why a task died.
+   */
+  errors: string[];
 };
 
 /**
@@ -51,10 +57,28 @@ export class MasterOrchestrator {
     private readonly provider: AIProvider,
   ) {}
 
-  /** Route a free-text instruction to the best-matching enabled agent. */
+  /**
+   * Why the last planning call failed, if it did. Exposed deliberately: a
+   * planner failure is the most common cause of a dead task, and hiding it
+   * turns a one-line fix into a mystery.
+   */
+  lastPlannerError: string | null = null;
+  /** The raw model reply when planning did not produce usable JSON. */
+  lastPlannerRaw: string | null = null;
+
+  /**
+   * Route a free-text instruction to the best-matching enabled agent.
+   *
+   * The Master Agent is deliberately EXCLUDED as a target: it holds no tools,
+   * so delegating to it can only ever produce a dead task. Routing to it was
+   * a real bug — a goal containing the word "KAIDO" matched the master's own
+   * name and stalled.
+   */
   route(objective: string): ChildAgent | undefined {
     const q = objective.toLowerCase();
-    const candidates = this.registry.list().filter((a) => a.enabled);
+    const candidates = this.registry
+      .list()
+      .filter((a) => a.enabled && a.parentAgentId !== undefined && a.name !== 'KAIDO');
     let best: { agent: ChildAgent; score: number } | undefined;
     for (const agent of candidates) {
       let score = 0;
@@ -85,7 +109,11 @@ export class MasterOrchestrator {
 
   /** Build an explicit plan from a goal, using the provider when available. */
   async plan(goal: string): Promise<DelegationPlan> {
-    const agents = this.registry.list().filter((a) => a.enabled);
+    // The Master Agent is excluded here too: it holds no tools, so a plan that
+    // assigns work to it can only fail. Listing it invited the model to pick it.
+    const agents = this.registry
+      .list()
+      .filter((a) => a.enabled && a.parentAgentId !== undefined && a.name !== 'KAIDO');
     const prompt: ChatMessage[] = [
       {
         role: 'system',
@@ -100,15 +128,23 @@ export class MasterOrchestrator {
     ];
     const steps: DelegationPlanStep[] = [];
     try {
-      const res = await this.provider.chat(prompt, { model: agents[0]?.model ?? 'gemini-2.0-flash', json: true, maxTokens: 800 });
+      const res = await this.provider.chat(prompt, {
+        model: process.env.KAIDO_DEFAULT_MODEL ?? agents[0]?.model ?? DEFAULT_MODEL,
+        json: true,
+        maxTokens: 800,
+      });
       const parsed = JSON.parse(extractJsonLoose(res.content)) as {
         steps?: { agentName: string; objective: string }[];
       };
       (parsed.steps ?? []).forEach((s, i) => {
         steps.push({ step: i + 1, agentName: s.agentName, objective: s.objective, status: 'pending' });
       });
-    } catch {
-      /* fall through to the deterministic single-step plan */
+    } catch (err) {
+      // Never swallow this. A planning failure is the single most common
+      // reason a task dies, and hiding it turns a one-line fix into a
+      // mystery. We still fall back to a deterministic plan, but we record
+      // WHY so the caller can show it.
+      this.lastPlannerError = err instanceof Error ? err.message : String(err);
     }
     if (steps.length === 0) {
       const agent = this.route(goal);
@@ -306,6 +342,17 @@ export class MasterOrchestrator {
       step.status = result.status === 'SUCCESS' ? 'done' : 'failed';
     }
 
+    // Collect every error the run produced. If the planner itself failed,
+    // that is the first and most important line.
+    const errors: string[] = [];
+    if (this.lastPlannerError) errors.push(`PLANNER: ${this.lastPlannerError}`);
+    for (const r of results) {
+      if (r.errors && r.errors.length) errors.push(...r.errors.map((e) => `${r.taskId}: ${e}`));
+      if (r.status === 'FAILED' && (!r.errors || r.errors.length === 0)) {
+        errors.push(`${r.taskId}: agent reported FAILED without a reason`);
+      }
+    }
+
     return {
       taskId: plan.id,
       summary: results.map((r) => r.summary).filter(Boolean).join(' '),
@@ -313,6 +360,7 @@ export class MasterOrchestrator {
       actionsPerformed: results.flatMap((r) => r.actionsPerformed),
       requiresUserAction,
       pendingConfirmations: allPending,
+      errors,
     };
   }
 }

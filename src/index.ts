@@ -201,6 +201,11 @@ export class Kaido {
     this.adapters.mount(new TermuxAdapter({ root: projectRoot }));
   }
 
+  /** Why the last planning call failed — surfaced so it is never silent. */
+  get lastPlannerError(): string | null {
+    return this.orchestrator.lastPlannerError;
+  }
+
   /** True state of every mounted adapter — never a guess. */
   async adapterStatus(): Promise<AdapterInfo[]> {
     return this.adapters.status();

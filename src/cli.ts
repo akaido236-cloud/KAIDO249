@@ -108,11 +108,81 @@ async function main(): Promise<void> {
       line('');
       line(outcome.summary || '(no summary)');
       if (outcome.actionsPerformed.length) line(`Actions: ${outcome.actionsPerformed.join(', ')}`);
+
+      // Errors are ALWAYS shown. A silent failure is the worst possible
+      // outcome: the user cannot tell a missing key from a bad model name
+      // from a genuine bug.
+      if (outcome.errors && outcome.errors.length) {
+        line('');
+        line('WHAT WENT WRONG');
+        for (const e of outcome.errors) line(`  - ${e}`);
+      }
+      if (kaido.lastPlannerError) {
+        line('');
+        line('PLANNER ERROR (the model call that failed)');
+        line(`  ${kaido.lastPlannerError}`);
+        line('');
+        line('  Most common causes:');
+        line('    - GEMINI_API_KEY missing or not exported in this shell');
+        line('    - the model name does not exist');
+        line('    - no network, or the key has no access to that model');
+        line('  Run:  kaido doctor');
+      }
       if (outcome.requiresUserAction) {
         line('');
         line('ACTION REQUIRES APPROVAL');
         for (const p of outcome.pendingConfirmations) line(`  [${p.id}] ${p.preview}`);
         line('Approve with: kaido confirm <id> --approve');
+      }
+      break;
+    }
+
+    case 'doctor': {
+      line('KAIDO diagnostics');
+      line('');
+      const providerId = (process.env.KAIDO_AI_PROVIDER ?? 'gemini').toLowerCase();
+      line(`  provider selected : ${providerId}`);
+      line(`  provider label    : ${kaido.provider.label}`);
+      line(`  configured        : ${kaido.provider.isConfigured() ? 'yes' : 'NO'}`);
+
+      if (providerId === 'gemini') {
+        const key = process.env.GEMINI_API_KEY ?? '';
+        line(`  GEMINI_API_KEY    : ${key ? `set (${key.length} chars, starts "${key.slice(0, 4)}…")` : 'NOT SET'}`);
+      }
+      line(`  default model     : ${process.env.KAIDO_DEFAULT_MODEL ?? '(built-in default)'}`);
+      line('');
+
+      if (!kaido.provider.isConfigured()) {
+        line('RESULT: the provider has no credentials, so any task will fail.');
+        line('  Fix: put GEMINI_API_KEY=... in .env, then run:');
+        line('       set -a; source .env; set +a');
+        break;
+      }
+
+      line('Testing a real call to the model...');
+      try {
+        const res = await kaido.provider.chat(
+          [{ role: 'user', content: 'Reply with exactly: OK' }],
+          { model: process.env.KAIDO_DEFAULT_MODEL ?? 'gemini-2.0-flash', maxTokens: 16 },
+        );
+        const reply = (res.content ?? '').trim();
+        line(`  model replied    : "${reply.slice(0, 60)}"`);
+        line(`  provider         : ${res.provider}`);
+        line('');
+        line('RESULT: the model is reachable and answering. Your setup is good.');
+        const nonsense = !/ok/i.test(reply);
+        if (nonsense) {
+          line('  (The reply did not contain "OK", but the call succeeded, so the');
+          line('   key and model are working.)');
+        }
+      } catch (err) {
+        line(`  FAILED: ${err instanceof Error ? err.message : String(err)}`);
+        line('');
+        line('RESULT: the key is present but the call failed. Read the message above:');
+        line('  - 400 / API_KEY_INVALID  → the key is wrong or truncated');
+        line('  - 403                    → the key is not enabled for this API');
+        line('  - 404                    → the model name does not exist');
+        line('  - fetch failed           → no network from this device');
       }
       break;
     }
@@ -207,6 +277,7 @@ const HELP = `KAIDO — personal AI Agent Operating System (headless CLI)
   kaido add-all-templates             instantiate every built-in template
   kaido tools                         list registered tools
   kaido ask "<goal>"                  Master Agent plans, delegates, reports
+  kaido doctor                        diagnose the AI provider (start here if a task fails)
   kaido create-agent "<description>"  propose an agent from natural language
   kaido activity [agentId]            recent audit entries
   kaido automations                   list automation rules
