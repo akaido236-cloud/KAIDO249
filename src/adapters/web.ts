@@ -149,18 +149,23 @@ export class WebAdapter implements Adapter {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const url = `${this.searchEndpoint}${this.searchEndpoint.includes('?') ? '&' : '?'}q=${encodeURIComponent(query)}`;
-      const res = await fetch(url, {
+      // Serper.dev contract: POST + X-API-KEY header + JSON body, response uses `organic[]`.
+      const res = await fetch(this.searchEndpoint, {
+        method: 'POST',
         signal: controller.signal,
-        headers: this.searchKey ? { authorization: `Bearer ${this.searchKey}` } : {},
+        headers: {
+          'content-type': 'application/json',
+          ...(this.searchKey ? { 'x-api-key': this.searchKey } : {}),
+        },
+        body: JSON.stringify({ q: query }),
       });
       if (!res.ok) {
         return { ok: false, code: `HTTP_${res.status}`, error: `Search provider returned ${res.status}.` };
       }
-      const json = (await res.json()) as { results?: SearchResult[] };
-      const results = (json.results ?? []).slice(0, 10).map((r) => ({
+      const json = (await res.json()) as { organic?: { title?: string; link?: string; snippet?: string }[] };
+      const results = (json.organic ?? []).slice(0, 10).map((r) => ({
         title: r.title ?? '',
-        url: r.url ?? '',
+        url: r.link ?? '',
         snippet: (r.snippet ?? '').slice(0, 500),
       }));
       return { ok: true, data: results };
