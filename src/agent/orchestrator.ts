@@ -281,6 +281,8 @@ export class MasterOrchestrator {
       errors.push(`PLAN_ERROR: ${err instanceof Error ? err.message : String(err)}`);
     }
 
+    const toolResultSummaries: string[] = [];
+
     for (const call of toolCalls) {
       if (!effectiveTools.includes(call.tool)) {
         errors.push(`REFUSED_TOOL: ${call.tool} is not available to ${agent.name}`);
@@ -290,10 +292,16 @@ export class MasterOrchestrator {
         preAuthorised: task.requireConfirmation === false && false,
       });
       switch (outcome.status) {
-        case 'COMPLETED':
-          actionsPerformed.push(`${call.tool}: ${(outcome.result as ToolResult).ok ? 'ok' : 'failed'}`);
-          if (!outcome.result.ok) errors.push(`${call.tool}: ${outcome.result.error}`);
+        case 'COMPLETED': {
+          const toolResult = outcome.result as ToolResult;
+          actionsPerformed.push(`${call.tool}: ${toolResult.ok ? 'ok' : 'failed'}`);
+          if (!toolResult.ok) {
+            errors.push(`${call.tool}: ${toolResult.error}`);
+          } else if (toolResult.summary) {
+            toolResultSummaries.push(toolResult.summary);
+          }
           break;
+        }
         case 'REQUIRES_CONFIRMATION':
           pending.push({ id: outcome.confirmation.id, preview: outcome.confirmation.preview });
           break;
@@ -303,6 +311,31 @@ export class MasterOrchestrator {
         case 'FORBIDDEN':
           errors.push(`FORBIDDEN ${call.tool}: ${outcome.reason}`);
           break;
+      }
+    }
+
+    // Second pass: the plan-time summary was written before tools ran, so it
+    // cannot reflect real results. If any tool returned data, ask the model
+    // to write the actual final answer from that data.
+    if (toolResultSummaries.length > 0 && pending.length === 0) {
+      try {
+        const finalRes = await this.provider.chat(
+          [
+            { role: 'system', content: `${agent.systemPrompt}\n\n${UNTRUSTED_CONTENT_POLICY}` },
+            {
+              role: 'user',
+              content:
+                `Objective: ${task.objective}\n\n` +
+                `Tool results:\n${toolResultSummaries.join('\n\n')}\n\n` +
+                `Write the final answer for the user based ONLY on the data above. ` +
+                `Plain text, no JSON, no preamble.`,
+            },
+          ],
+          { model: agent.model, maxTokens: 800 },
+        );
+        if (finalRes.content?.trim()) summary = finalRes.content.trim();
+      } catch (err) {
+        errors.push(`SUMMARY_ERROR: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
