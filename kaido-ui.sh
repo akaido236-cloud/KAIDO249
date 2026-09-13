@@ -1,0 +1,145 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# KAIDO — واجهة الويب.
+# الاستخدام:  cd ~/kaido && bash kaido-ui.sh
+#
+# لا يعدّل أي ملف من مشروعك. ينشئ ملفاً واحداً جديداً فقط: kaido-ui.mjs
+set -uo pipefail
+
+EXPECT="699807a5a3c45d53cc6c20343ca1d21ced23e8abbefe88bf7c4eb3a9e3cdae86"
+
+say()  { printf '\n\033[1;34m==>\033[0m %s\n' "$1"; }
+ok()   { printf '\033[1;32m  ✓\033[0m %s\n' "$1"; }
+die()  { printf '\n\033[1;31m[x]\033[0m %s\n' "$1" >&2; exit 1; }
+
+[ -f package.json ] || die "شغّل السكربت من داخل مجلد المشروع:  cd ~/kaido"
+say "المجلد صحيح: $PWD"
+
+[ -f dist/index.js ] || { say "أبني أولاً"; [ -d node_modules ] || npm install || die "التثبيت فشل"; npm run build || die "البناء فشل"; ok "تم البناء"; }
+
+say "أركّب الواجهة"
+base64 -d 2>/dev/null <<'KAIDO_UI_EOF' | gunzip > kaido-ui.mjs
+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
+42LNXZoU1ciQPVm9fwEmoptDhDsAAA==
+KAIDO_UI_EOF
+
+[ -s kaido-ui.mjs ] || die "الملف فارغ — اللصق ناقص."
+GOT="$(sha256sum kaido-ui.mjs | cut -d' ' -f1)"
+[ "$GOT" = "$EXPECT" ] || die "الملف تالف — أعد اللصق كاملاً من غير قطع."
+node --check kaido-ui.mjs || die "خطأ صياغة — اللصق ناقص."
+ok "الواجهة جاهزة (بصمة مطابقة)"
+
+printf '\n\033[1;32m  تم\033[0m\n\n'
+cat <<'NEXT'
+شغّلها:
+
+    set -a; source .env; set +a
+    KAIDO_UI_EXPOSE=true node kaido-ui.mjs
+
+رابط فيه توكن راح يطلع — افتحه في متصفّح التلفون.
+بدون KAIDO_UI_EXPOSE تبقى على localhost فقط.
+
+NEXT

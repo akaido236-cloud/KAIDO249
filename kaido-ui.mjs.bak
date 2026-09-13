@@ -1,0 +1,165 @@
+#!/usr/bin/env node
+// KAIDO web UI — standalone. Imports the built runtime from ./dist and serves
+// the interface itself, so no source is changed and nothing is rebuilt.
+//   node kaido-ui.mjs                          localhost
+//   KAIDO_UI_EXPOSE=true node kaido-ui.mjs     reachable on your LAN
+import { createServer } from 'node:http';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { networkInterfaces } from 'node:os';
+
+let Kaido;
+try { ({ Kaido } = await import('./dist/index.js')); }
+catch (e) {
+  console.error('\nKAIDO runtime not found in ./dist — run:  npm run build\n');
+  process.exit(1);
+}
+
+const EXPOSE = process.env.KAIDO_UI_EXPOSE === 'true';
+const HOST = process.env.KAIDO_UI_HOST || (EXPOSE ? '0.0.0.0' : '127.0.0.1');
+const PORT = Number(process.env.KAIDO_UI_PORT || 7070);
+const TOKEN = process.env.KAIDO_UI_TOKEN || randomBytes(16).toString('hex');
+
+const PAGE = '<!doctype html><html lang=en><head><meta charset=utf-8>' +
+'<meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">' +
+'<meta name=color-scheme content=dark><title>KAIDO</title><style>' +
+':root{--b:#0B0D10;--s:#151A20;--s2:#1C2229;--l:#242C35;--t:#E6E8EA;--m:#8B929A;--a:#3B82F6;--ad:#1E3A5F;--ok:#22C55E;--wn:#F59E0B;--bd:#EF4444}' +
+'*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html,body{margin:0;height:100%}' +
+'body{background:var(--b);color:var(--t);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;flex-direction:column;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}' +
+'header{padding:13px 16px;border-bottom:1px solid var(--l);display:flex;align-items:center;gap:9px;flex:none}' +
+'h1{font-size:17px;margin:0;font-weight:650}.dot{width:7px;height:7px;border-radius:50%;background:var(--m)}.dot.on{background:var(--ok)}.dot.off{background:var(--bd)}' +
+'.sub{font-size:12px;color:var(--m);margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:55%}' +
+'nav{display:flex;gap:2px;padding:7px 16px;border-bottom:1px solid var(--l);flex:none}' +
+'nav button{background:none;border:0;color:var(--m);font:inherit;font-size:13.5px;font-weight:550;padding:8px 12px;border-radius:9px;cursor:pointer}' +
+'nav button[aria-selected=true]{background:var(--s2);color:var(--t)}' +
+'main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:16px}.p{display:none}.p[data-on=true]{display:block}' +
+'.c{background:var(--s);border:1px solid var(--l);border-radius:14px;padding:13px 14px;margin-bottom:10px}' +
+'.c h3{margin:0 0 4px;font-size:14.5px;font-weight:600}.c p{margin:0;font-size:13px;color:var(--m)}' +
+'.r{display:flex;align-items:center;gap:8px}.r.b{justify-content:space-between}' +
+'.g{font-size:11px;font-weight:600;padding:3px 8px;border-radius:99px;background:var(--s2);color:var(--m);flex:none}' +
+'.g.ok{background:rgba(34,197,94,.15);color:var(--ok)}.g.wn{background:rgba(245,158,11,.15);color:var(--wn)}.g.bd{background:rgba(239,68,68,.15);color:var(--bd)}.g.i{background:var(--ad);color:#93C5FD}' +
+'.e{text-align:center;color:var(--m);font-size:13.5px;padding:30px 16px;line-height:1.7}' +
+'.co{flex:none;border-top:1px solid var(--l);padding:10px 16px;display:flex;gap:8px}' +
+'textarea{flex:1;background:var(--s);border:1px solid var(--l);border-radius:12px;color:var(--t);font:inherit;font-size:15px;padding:11px 13px;resize:none;min-height:46px;max-height:110px}' +
+'textarea:focus{outline:none;border-color:var(--a)}' +
+'.snd{background:var(--a);border:0;color:#fff;font:inherit;font-weight:600;padding:0 18px;height:46px;border-radius:12px;cursor:pointer;flex:none}' +
+'.snd:disabled{opacity:.4}' +
+'.bb{background:var(--s);border:1px solid var(--l);border-radius:14px;padding:12px 14px;margin-bottom:10px}' +
+'.bb.me{background:var(--ad);border-color:transparent;margin-left:14%}' +
+'.bb .w{font-size:11px;color:var(--m);font-weight:650;text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}' +
+'.bb pre{white-space:pre-wrap;word-break:break-word;margin:0;font:inherit;font-size:14.5px}' +
+'.st{display:flex;gap:9px;padding:7px 0;font-size:13.5px;border-bottom:1px solid var(--l)}.st:last-child{border:0}' +
+'.er{margin-top:10px;border-left:3px solid var(--bd);background:rgba(239,68,68,.07);border-radius:0 10px 10px 0;padding:10px 12px}' +
+'.er .h{font-size:11px;font-weight:700;color:var(--bd);text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}' +
+'.er li{font-size:13px;color:#FCA5A5;margin:3px 0}' +
+'.stop{background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);color:#FCA5A5;font:inherit;font-weight:600;font-size:14px;padding:11px;border-radius:12px;width:100%;cursor:pointer}' +
+'.sp{display:inline-block;width:13px;height:13px;border:2px solid var(--m);border-top-color:var(--a);border-radius:50%;animation:sp .7s linear infinite;vertical-align:-2px}@keyframes sp{to{transform:rotate(360deg)}}' +
+'</style></head><body>' +
+'<header><svg width=24 height=24 viewBox="0 0 108 108"><rect width=108 height=108 rx=22 fill=#0B0D10/><path fill=#3B82F6 d="M34 26h9v24l20-24h11l-22 26l23 30h-11l-21-27v27h-9z"/></svg>' +
+'<h1>KAIDO</h1><span class=dot id=sd></span><span class=sub id=st>…</span></header>' +
+'<nav><button data-t=chat aria-selected=true>Chat</button><button data-t=agents>Agents</button><button data-t=tools>Tools</button><button data-t=control>Control</button></nav>' +
+'<main><section class=p data-p=chat data-on=true><div id=th></div>' +
+'<div class=e id=ce>KAIDO plans, delegates to a specialist agent, and reports back.<br>Give it a task below.</div></section>' +
+'<section class=p data-p=agents><div id=al></div></section>' +
+'<section class=p data-p=tools><div id=tl></div></section>' +
+'<section class=p data-p=control><div class=c><h3>Emergency stop</h3><p style=margin-bottom:12px>Halts all tasks and blocks new tool execution. The audit log is kept.</p>' +
+'<button class=stop id=stop>STOP KAIDO</button></div><div class=c><h3>Runtime</h3><pre id=ri style="font:12px/1.5 monospace;color:var(--m);white-space:pre-wrap;margin:0">—</pre></div></section>' +
+'</main><div class=co id=co><textarea id=in rows=1 placeholder="Ask KAIDO…"></textarea><button class=snd id=send>Send</button></div>' +
+'<script>(function(){var $=function(s){return document.querySelector(s)};' +
+'var T=new URLSearchParams(location.search).get("token")||"";' +
+'function api(p,o){o=o||{};var h={Accept:"application/json"};if(T)h["x-kaido-token"]=T;if(o.body)h["content-type"]="application/json";' +
+'return fetch(p,{method:o.method||"GET",headers:h,body:o.body?JSON.stringify(o.body):undefined}).then(function(r){return r.json().then(function(j){if(!r.ok)throw Error(j.error||("HTTP "+r.status));return j})})}' +
+'function esc(s){return String(s==null?"":s).replace(/[&<>"\']/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;","\'":"&#39;"}[c]})}' +
+'var co=$("#co");[].forEach.call(document.querySelectorAll("nav button"),function(b){b.onclick=function(){' +
+'[].forEach.call(document.querySelectorAll("nav button"),function(x){x.setAttribute("aria-selected","false")});' +
+'[].forEach.call(document.querySelectorAll(".p"),function(p){p.setAttribute("data-on","false")});' +
+'b.setAttribute("aria-selected","true");document.querySelector("[data-p="+b.dataset.t+"]").setAttribute("data-on","true");' +
+'co.style.display=b.dataset.t=="chat"?"flex":"none";if(b.dataset.t!="chat")load(b.dataset.t)}});' +
+'function stat(){return api("/api/status").then(function(s){var d=$("#sd");d.className="dot "+(s.emergencyStopped?"off":(s.running?"on":""));' +
+'$("#st").textContent=s.emergencyStopped?"STOPPED":s.agents+" agents · "+s.pendingConfirmations+" pending";' +
+'$("#ri").textContent=JSON.stringify(s,null,2);$("#stop").disabled=s.emergencyStopped;' +
+'$("#stop").textContent=s.emergencyStopped?"KAIDO IS STOPPED":"STOP KAIDO"}).catch(function(){$("#sd").className="dot off";$("#st").textContent="offline"})}' +
+'function load(w){if(w=="agents"){api("/api/agents").then(function(r){var e=$("#al");' +
+'if(!r.agents.length){e.innerHTML=\'<div class=e>No agents yet.<br>Run: node dist/cli.js add-all-templates</div>\';return}' +
+'e.innerHTML=r.agents.map(function(a){var c=a.isMaster?"i":(a.enabled?"ok":"wn");var l=a.isMaster?"master":(a.enabled?"active":"off");' +
+'return \'<div class=c><div class="r b"><h3>\'+esc(a.name)+\'</h3><span class="g \'+c+\'">\'+l+\'</span></div><p>\'+esc(a.description||"")+\'</p><p style=margin-top:7px>tools: \'+(a.tools.length?esc(a.tools.join(", ")):"none")+\'</p></div>\'}).join("")})}' +
+'else if(w=="tools"){api("/api/tools").then(function(r){var o={LOW:0,MEDIUM:1,HIGH:2,CRITICAL:3},c={LOW:"ok",MEDIUM:"i",HIGH:"wn",CRITICAL:"bd"};' +
+'r.tools.sort(function(a,b){return o[a.riskLevel]-o[b.riskLevel]||a.id.localeCompare(b.id)});' +
+'$("#tl").innerHTML=r.tools.map(function(t){return \'<div class=c><div class="r b"><h3>\'+esc(t.id)+\'</h3><span class="g \'+c[t.riskLevel]+\'">\'+t.riskLevel+\'</span></div><p>\'+esc(t.description)+\'</p>\'+(t.requiresConfirmation?\'<p style=margin-top:6px;color:var(--wn)>requires confirmation</p>\':"")+\'</div>\'}).join("")})}}' +
+'function bb(w,h,me){var d=document.createElement("div");d.className="bb"+(me?" me":"");d.innerHTML=\'<div class=w>\'+esc(w)+\'</div>\'+h;' +
+'$("#th").appendChild(d);d.scrollIntoView({behavior:"smooth",block:"end"});return d}' +
+'function render(o){var h="";if(o.plan&&o.plan.steps&&o.plan.steps.length)h+=o.plan.steps.map(function(s){' +
+'return \'<div class=st><b style="color:var(--m)">\'+s.step+\'</b><span>\'+esc(s.agentName)+\' → \'+esc(s.objective)+\' <span style=color:var(--m)>[\'+esc(s.status)+\']</span></span></div>\'}).join("");' +
+'if(o.summary)h+=\'<pre style=margin-top:10px>\'+esc(o.summary)+\'</pre>\';' +
+'if(o.errors&&o.errors.length)h+=\'<div class=er><div class=h>What went wrong</div><ul>\'+o.errors.map(function(e){return "<li>"+esc(e)+"</li>"}).join("")+"</ul></div>";' +
+'if(o.requiresUserAction&&o.pendingConfirmations&&o.pendingConfirmations.length)h+=\'<div class=er style="border-color:var(--wn);background:rgba(245,158,11,.08)"><div class=h style=color:var(--wn)>Requires your approval</div><ul>\'+o.pendingConfirmations.map(function(p){return \'<li style=color:#FCD34D>\'+esc(p.preview)+"</li>"}).join("")+"</ul></div>";' +
+'return h||"<pre>No output.</pre>"}' +
+'function send(){var t=$("#in").value.trim();if(!t)return;$("#ce").style.display="none";$("#in").value="";' +
+'bb("You","<pre>"+esc(t)+"</pre>",true);var p=bb("KAIDO",\'<span class=sp></span> planning…\');$("#send").disabled=true;' +
+'api("/api/ask",{method:"POST",body:{goal:t}}).then(function(o){p.innerHTML=render(o);p.scrollIntoView({behavior:"smooth",block:"end"})})' +
+'.catch(function(e){p.innerHTML=\'<div class=er><div class=h>Request failed</div><ul><li>\'+esc(e.message)+"</li></ul></div>"})' +
+'.then(function(){$("#send").disabled=false;stat()})}' +
+'$("#send").onclick=send;$("#in").onkeydown=function(e){if(e.key=="Enter"&&!e.shiftKey){e.preventDefault();send()}};' +
+'$("#stop").onclick=function(){$("#stop").disabled=true;api("/api/stop",{method:"POST"}).then(function(){stat();' +
+'bb("KAIDO","<pre>Emergency stop engaged. All tasks halted.</pre>")})};stat();setInterval(stat,10000)})();</script></body></html>';
+
+const J = (res, code, b) => { res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(JSON.stringify(b, null, 2)); };
+const eq = (a, b) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
+
+function body(req, cap = 1e5) {
+  return new Promise((ok, no) => {
+    let n = 0; const c = [];
+    req.on('data', (d) => { n += d.length; if (n > cap) { no(new Error('Body too large.')); req.destroy(); return; } c.push(d); });
+    req.on('end', () => { const r = Buffer.concat(c).toString('utf8'); if (!r) return ok({}); try { const p = JSON.parse(r); ok(p && typeof p === 'object' ? p : {}); } catch { no(new Error('Body is not valid JSON.')); } });
+    req.on('error', no);
+  });
+}
+
+const kaido = new Kaido({ adapters: true, projectRoot: process.env.KAIDO_TERMUX_PROJECT_ROOT || process.cwd() });
+
+async function route(req, res) {
+  const u = new URL(req.url || '/', 'http://x');
+  const p = u.pathname;
+
+  if (p === '/' && req.method === 'GET') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' });
+    return res.end(PAGE);
+  }
+  // Open by design: the APK uses it to recognise a KAIDO runtime. Reveals nothing.
+  if (p === '/health') return J(res, 200, { service: 'kaido', ok: true });
+
+  const tok = String(req.headers['x-kaido-token'] || u.searchParams.get('token') || '');
+  if (!eq(tok, TOKEN)) return J(res, 401, { error: 'Unauthorized. Missing or wrong token.' });
+
+  if (p === '/api/status') return J(res, 200, kaido.status());
+  if (p === '/api/agents') return J(res, 200, { agents: kaido.registry.list().map((a) => ({ id: a.id, name: a.name, description: a.description, enabled: a.enabled, tools: a.tools, version: a.version, isMaster: a.parentAgentId === undefined })) });
+  if (p === '/api/tools') return J(res, 200, { tools: kaido.tools.list().map((t) => ({ id: t.id, description: t.description, category: t.category, riskLevel: t.riskLevel, requiresConfirmation: t.requiresConfirmation })) });
+  if (p === '/api/adapters') return J(res, 200, { adapters: await kaido.adapterStatus() });
+  if (p === '/api/stop' && req.method === 'POST') { kaido.stop(); return J(res, 200, kaido.status()); }
+  if (p === '/api/resume' && req.method === 'POST') { kaido.resume(); return J(res, 200, kaido.status()); }
+  if (p === '/api/ask' && req.method === 'POST') {
+    const b = await body(req);
+    const goal = typeof b.goal === 'string' ? b.goal.trim() : '';
+    if (!goal) return J(res, 400, { error: 'Missing "goal".' });
+    const { plan, outcome } = await kaido.ask(goal);
+    return J(res, 200, { plan, ...outcome });
+  }
+  return J(res, 404, { error: 'No route for ' + req.method + ' ' + p });
+}
+
+const server = createServer((req, res) => route(req, res).catch((e) => J(res, 500, { error: e?.message || String(e) })));
+
+server.listen(PORT, HOST, () => {
+  const a = server.address();
+  const port = a && typeof a === 'object' ? a.port : PORT;
+  const lan = [];
+  for (const n of Object.keys(networkInterfaces())) for (const i of networkInterfaces()[n] || []) if (i.family === 'IPv4' && !i.internal) lan.push(i.address);
+  console.log('\n  KAIDO web UI is running.\n');
+  console.log(`  this device   http://127.0.0.1:${port}/?token=${TOKEN}`);
+  if (EXPOSE && lan.length) { console.log('  other devices on your network:'); for (const ip of lan) console.log(`                http://${ip}:${port}/?token=${TOKEN}`); }
+  else if (!EXPOSE) console.log('  (localhost only — KAIDO_UI_EXPOSE=true to reach it elsewhere)');
+  console.log(`\n  token         ${TOKEN}\n`);
+  console.log('  Open that URL on your phone. The token is required.');
+  console.log('  Ctrl+C to stop.\n');
+});
+
+for (const s of ['SIGINT', 'SIGTERM']) process.on(s, () => server.close(() => process.exit(0)));
